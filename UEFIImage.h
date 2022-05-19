@@ -2,17 +2,28 @@
 #define UEFI_IMAGE_PARSER_UEFIIMAGE_H
 #include "Region.h"
 
+typedef struct {
+    std::uint8_t GUID[16];
+    std::uint32_t headerSie;
+    std::uint32_t flags;
+    std::uint32_t capsuleImageSize;
+    std::uint16_t FWImageOffset;
+    std::uint16_t OEMHeaderOffset;
+} EFI_CAPSULE_HEADER;
+
 class UEFIImage {
 public:
-    UEFIImage() : size(0) {
+
+    UEFIImage() : isCapsuledFlag(false) {
+
     }
 
-    std::uint32_t getImageSize() const {
-        return size;
+    EFI_CAPSULE_HEADER getCapsuleHeader() const {
+        return capsuleHeader;
     }
 
-    void setImageSize(std::uint32_t size_) {
-        size = size_;
+    void setCapsuleHeader(const EFI_CAPSULE_HEADER capsuleHeader_) {
+        capsuleHeader = capsuleHeader_;
     }
     void setFlashDescriptorRegion(const FlashDescriptorRegion &src) {
         flashDescriptorRegion = src;
@@ -29,10 +40,20 @@ public:
     BiosRegion getBiosRegion() {
         return biosRegion;
     }
+
+    bool isCapsuled() const{
+        return isCapsuledFlag;
+    }
+
+    void setCapsuledFlag(const bool flag) {
+        isCapsuledFlag = flag;
+    }
+
 private:
     FlashDescriptorRegion flashDescriptorRegion;
     BiosRegion biosRegion;
-    std::uint32_t size;
+    EFI_CAPSULE_HEADER capsuleHeader;
+    bool isCapsuledFlag;
 
 };
 

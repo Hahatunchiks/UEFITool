@@ -10,15 +10,6 @@ typedef struct {
 } EFI_FLASH_DESCRIPTOR;
 
 
-typedef struct {
-    std::uint8_t GUID[16];
-    std::uint32_t headerSie;
-    std::uint32_t flags;
-    std::uint32_t capsuleImageSize;
-    std::uint16_t FWImageOffset;
-    std::uint16_t OEMHeaderOffset;
-} EFI_CAPSULE_HEADER;
-
 static void CalculateFlashSectionsBases(const std::uint8_t offset, std::uint32_t &dest) {
     std::bitset<8> offsetAddress(offset);
     std::bitset<32> address(0);
@@ -73,7 +64,45 @@ static std::uint32_t findNextVolumeFV(std::ifstream &img) {
     return 0;
 }
 
-static void processBiosFV(std::ifstream &image, BiosRegion &biosRegion, bool isFirst = false) {
+std::uint32_t UEFIParser::calculateSize(std::uint8_t *size_) const {
+    std::bitset<8> sizeLeft(size_[0]);
+    std::bitset<8> sizeMid(size_[1]);
+    std::bitset<8> sizeRight(size_[2]);
+    std::bitset<24> size(0);
+    for (int i = 0; i < 8; i++) {
+        size[i] = sizeLeft[i];
+        size[i + 8] = sizeMid[i];
+        size[i + 16] = sizeRight[i];
+    }
+
+    return size.to_ulong();
+}
+
+void UEFIParser::processBiosFile(std::ifstream &image, BIOS_FILE &file, bool isFirst = false) const {
+    EFI_COMMON_SECTION_HEADER section;
+    std::uint32_t readedFileBytes = sizeof(file.header);
+    while (readedFileBytes < calculateSize(file.header.Size) - 4) {
+        image.read((char *) (&section), sizeof(section));
+        image.seekg(calculateSize(section.size) - sizeof(section), std::ios_base::cur);
+        readedFileBytes += calculateSize(section.size);
+        file.sectionHeaders.push_back(section);
+        if(image.tellg() % 16 <= 4) {
+            image.seekg(((std::uint32_t) (4 - image.tellg()) % 4), std::ios_base::cur);
+            readedFileBytes += (4 - image.tellg()) % 4;
+        } else if(image.tellg() % 16 <= 8) {
+            image.seekg(((std::uint32_t) (8 - image.tellg()) % 4), std::ios_base::cur);
+            readedFileBytes += (8 - image.tellg()) % 4;
+        } else if(image.tellg() % 16 <= 12) {
+            image.seekg(((std::uint32_t) (12 - image.tellg()) % 4), std::ios_base::cur);
+            readedFileBytes += (12 - image.tellg()) % 4;
+        } else {
+            image.seekg(((std::uint32_t) (16 - image.tellg()) % 4), std::ios_base::cur);
+            readedFileBytes += (16 - image.tellg()) % 4;
+        }
+    }
+}
+
+void UEFIParser::processBiosFV(std::ifstream &image, BiosRegion &biosRegion, bool isFirst = false) const {
     EFI_FIRMWARE_VOLUME_HEADER FVHeader0;
     EFI_FV_BLOCK_MAP map;
 
@@ -92,30 +121,27 @@ static void processBiosFV(std::ifstream &image, BiosRegion &biosRegion, bool isF
     std::uint32_t readedBytes = 0;
     while (readedBytes < FVHeader0.fvLength - FVHeader0.headerLength) {
         image.read((char *) (&file.header), sizeof(file.header));
-        if (file.header.State == 0xFF) {
+        if (file.header.State != 0xF8) {
             break;
         }
 
-        std::bitset<8> sizeLeft(file.header.Size[0]);
-        std::bitset<8> sizeMid(file.header.Size[1]);
-        std::bitset<8> sizeRight(file.header.Size[2]);
-        std::bitset<24> size(0);
-        for (int i = 0; i < 8; i++) {
-            size[i] = sizeLeft[i];
-            size[i + 8] = sizeMid[i];
-            size[i + 16] = sizeRight[i];
+        std::uint32_t size = calculateSize(file.header.Size);
+        readedBytes += size;
+        if (file.header.Type == 0x06 || file.header.Type == 0x07) {
+            processBiosFile(image, file);
+         } else {
+        image.seekg(size - sizeof(file.header), std::ios_base::cur);
         }
         files.push_back(file);
-        readedBytes += size.to_ulong();
-        image.seekg(size.to_ulong() - sizeof(file.header), std::ios_base::cur);
         //FFS alignment
         if (image.tellg() % 16 <= 8) {
             image.seekg(((std::uint32_t) (8 - (image.tellg())) % 8), std::ios_base::cur);
-            readedBytes += image.tellg() % 8;
+            readedBytes += (8 - image.tellg()) % 8;
         } else {
             image.seekg((std::uint32_t) ((16 - image.tellg())) % 8, std::ios_base::cur);
             readedBytes += (16 - image.tellg()) % 8;
         }
+        file.sectionHeaders.clear();
     }
 
     EFI_VOLUME volume = {.volumeHeader = FVHeader0, .files = files};
@@ -144,8 +170,10 @@ void UEFIParser::parse() const {
         if (!isHasNotCapsuleHeader) {
             image.read((char *) (&capsuleHeader), sizeof(capsuleHeader));
             offset += capsuleHeader.FWImageOffset;
-            flashDescriptorRegion.address = 0;
+            flashDescriptorRegion.address = capsuleHeader.FWImageOffset;
             image.seekg(offset);
+            img->setCapsuleHeader(capsuleHeader);
+            img->setCapsuledFlag(true);
         } else {
             flashDescriptorRegion.address = capsuleHeader.FWImageOffset;
         }
@@ -174,6 +202,7 @@ void UEFIParser::parse() const {
             nextFvBeg = findNextVolumeFV(image);
         }
         img->setBiosRegion(biosRegion);
+
     } else {
         std::cerr << "No such file\n";
         exit(-1);

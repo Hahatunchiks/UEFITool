@@ -12,6 +12,9 @@ public:
         img = new UEFIImage;
     }
 
+    void processBiosFile(std::ifstream &image, BIOS_FILE &file, bool isFirst) const;
+    void processBiosFV(std::ifstream &image, BiosRegion &biosRegion, bool isFirst) const;
+    std::uint32_t calculateSize(std::uint8_t *size_) const;
     void parse() const;
 
     UEFIImage *getImage() {

@@ -14,7 +14,7 @@ struct Region {
 
 struct FlashDescriptorRegion : public Region {
     FlashDescriptorRegion() {
-        name = "Flash Descriptor Region";
+        name = "FlashDescriptorRegion";
     }
 
     std::uint32_t componentSectionBase{};
